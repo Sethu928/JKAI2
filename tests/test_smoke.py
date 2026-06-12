@@ -25,6 +25,13 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setattr(app_module, "llm_call", lambda *a, **kw: "réponse test")
     monkeypatch.setattr(app_module, "is_alive", lambda *a, **kw: True)
 
+    # Stub agent start/stop so no real threads are spawned
+    monkeypatch.setattr(app_module, "start_agent", lambda log: True)
+    monkeypatch.setattr(app_module, "stop_agent", lambda log: True)
+
+    # Reset agent flag between tests
+    app_module.AGENT_ACTIVE = False
+
     app_module.app.config["TESTING"] = True
     with app_module.app.test_client() as c:
         yield c
@@ -152,6 +159,57 @@ class TestHistory:
             client.post("/chat", json={"message": f"msg{i}"})
         data = client.get("/history?limit=3").get_json()
         assert len(data["messages"]) == 3
+
+
+# ---------------------------------------------------------------------------
+# /agent
+# ---------------------------------------------------------------------------
+
+class TestAgentControl:
+    def test_start_returns_200(self, client):
+        resp = client.post("/agent", json={"action": "start"})
+        assert resp.status_code == 200
+
+    def test_start_sets_agent_active(self, client):
+        client.post("/agent", json={"action": "start"})
+        data = client.get("/config").get_json()
+        assert data["AGENT_ACTIVE"] is True
+
+    def test_start_response_fields(self, client):
+        data = client.post("/agent", json={"action": "start"}).get_json()
+        assert "agent_active" in data
+        assert "started" in data
+        assert "message" in data
+
+    def test_stop_returns_200(self, client):
+        client.post("/agent", json={"action": "start"})
+        resp = client.post("/agent", json={"action": "stop"})
+        assert resp.status_code == 200
+
+    def test_stop_clears_agent_active(self, client):
+        client.post("/agent", json={"action": "start"})
+        client.post("/agent", json={"action": "stop"})
+        data = client.get("/config").get_json()
+        assert data["AGENT_ACTIVE"] is False
+
+    def test_stop_response_fields(self, client):
+        client.post("/agent", json={"action": "start"})
+        data = client.post("/agent", json={"action": "stop"}).get_json()
+        assert "agent_active" in data
+        assert "stopped" in data
+        assert "message" in data
+
+    def test_invalid_action_returns_400(self, client):
+        resp = client.post("/agent", json={"action": "restart"})
+        assert resp.status_code == 400
+
+    def test_missing_action_returns_400(self, client):
+        resp = client.post("/agent", json={})
+        assert resp.status_code == 400
+
+    def test_agent_not_started_at_boot(self, client):
+        data = client.get("/config").get_json()
+        assert data["AGENT_ACTIVE"] is False
 
 
 # ---------------------------------------------------------------------------

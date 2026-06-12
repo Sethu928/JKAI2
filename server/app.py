@@ -1,6 +1,6 @@
 """
 Flask entry-point for JKAI2.
-Provides /chat, /health, /config, /history and the killswitch route.
+Provides /chat, /health, /config, /history, /agent and the killswitch route.
 """
 
 import threading
@@ -14,6 +14,7 @@ import config
 import core.memory as memory
 from core.llm import is_alive, llm_call
 from core.safety import register_killswitch
+from brain.agent import start_agent, stop_agent
 
 # ---------------------------------------------------------------------------
 # App & globals
@@ -147,6 +148,34 @@ def config_route():
         return jsonify({"error": "No recognised keys. Use AGENT_ACTIVE or AUTO_UPDATE_FROM_CHAT"}), 400
 
     return jsonify({"updated": changed})
+
+
+@app.route("/agent", methods=["POST"])
+def agent_control():
+    global AGENT_ACTIVE
+
+    data = request.get_json(silent=True) or {}
+    action = data.get("action", "").strip().lower()
+
+    if action == "start":
+        AGENT_ACTIVE = True
+        started = start_agent(log)
+        return jsonify({
+            "agent_active": AGENT_ACTIVE,
+            "started": started,
+            "message": "Agent démarré" if started else "Agent déjà en cours",
+        })
+
+    if action == "stop":
+        AGENT_ACTIVE = False
+        stopped = stop_agent(log)
+        return jsonify({
+            "agent_active": AGENT_ACTIVE,
+            "stopped": stopped,
+            "message": "Signal d'arrêt envoyé" if stopped else "Aucun agent en cours",
+        })
+
+    return jsonify({"error": "action must be 'start' or 'stop'"}), 400
 
 
 @app.route("/history", methods=["GET"])
